@@ -28,8 +28,6 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # No apt install: these tools already ship on the runner image.
-      # This step only fails (within seconds) if one is genuinely missing.
       - name: Check tools for runtime asset preparation
         timeout-minutes: 2
         run: |
@@ -37,26 +35,24 @@ jobs:
             command -v "$t" >/dev/null || { echo "Missing tool: $t"; exit 1; }
           done
 
-      # Downloads PRoot (Termux repo) and the Alpine test rootfs, verifies SHA-256, patches/places them.
-      # Fails the build loudly if anything is missing or unexpected.
       - name: Fetch and verify runtime assets
         timeout-minutes: 10
         run: bash scripts/fetch-runtime-assets.sh
 
-      - name: Set up Gradle
+      # Caching only. Gradle itself comes from the committed wrapper.
+      - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
+        timeout-minutes: 10
 
-      # The Gradle wrapper JAR is a binary and is not part of the hand-uploaded sources.
-      # Generate it when absent, then build exclusively through ./gradlew.
-      - name: Generate Gradle wrapper (only if not committed)
+      - name: Check Gradle wrapper files
         run: |
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            gradle wrapper --gradle-version 8.9 --distribution-type bin
-          fi
+          for f in gradlew gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties; do
+            [ -f "$f" ] || { echo "Missing $f: commit the files from the gradle-wrapper-files artifact"; exit 1; }
+          done
+          chmod +x gradlew
 
       - name: Build debug APK
+        timeout-minutes: 20
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Show APK contents (native libs and assets)
@@ -70,15 +66,3 @@ jobs:
           name: asl-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-      # Lets you commit a real wrapper to the repo afterwards (optional).
-      - name: Upload generated Gradle wrapper
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-wrapper-files
-          path: |
-            gradlew
-            gradlew.bat
-            gradle/wrapper/gradle-wrapper.jar
-            gradle/wrapper/gradle-wrapper.properties
-          if-no-files-found: warn
