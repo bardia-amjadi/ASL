@@ -1,0 +1,79 @@
+name: Build debug APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install tools for runtime asset preparation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends patchelf binutils xz-utils
+
+      # Downloads PRoot (Termux repo) and the Alpine test rootfs, verifies SHA-256, patches/places them.
+      # Fails the build loudly if anything is missing or unexpected.
+      - name: Fetch and verify runtime assets
+        run: bash scripts/fetch-runtime-assets.sh
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      # The Gradle wrapper JAR is a binary and is not part of the hand-uploaded sources.
+      # Generate it when absent, then build exclusively through ./gradlew.
+      - name: Generate Gradle wrapper (only if not committed)
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version 8.9 --distribution-type bin
+          fi
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Show APK contents (native libs and assets)
+        run: |
+          ls -l app/build/outputs/apk/debug/
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E "lib/|assets/rootfs/" || true
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: asl-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Lets you commit a real wrapper to the repo afterwards (optional).
+      - name: Upload generated Gradle wrapper
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-wrapper-files
+          path: |
+            gradlew
+            gradlew.bat
+            gradle/wrapper/gradle-wrapper.jar
+            gradle/wrapper/gradle-wrapper.properties
+          if-no-files-found: warn
