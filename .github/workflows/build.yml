@@ -28,14 +28,19 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install tools for runtime asset preparation
+      # No apt install: these tools already ship on the runner image.
+      # This step only fails (within seconds) if one is genuinely missing.
+      - name: Check tools for runtime asset preparation
+        timeout-minutes: 2
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends patchelf binutils xz-utils
+          for t in patchelf readelf xz gzip dpkg-deb curl python3 sha256sum; do
+            command -v "$t" >/dev/null || { echo "Missing tool: $t"; exit 1; }
+          done
 
       # Downloads PRoot (Termux repo) and the Alpine test rootfs, verifies SHA-256, patches/places them.
       # Fails the build loudly if anything is missing or unexpected.
       - name: Fetch and verify runtime assets
+        timeout-minutes: 10
         run: bash scripts/fetch-runtime-assets.sh
 
       - name: Set up Gradle
