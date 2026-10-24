@@ -39,16 +39,17 @@ jobs:
         timeout-minutes: 10
         run: bash scripts/fetch-runtime-assets.sh
 
-      # Caching only. Gradle itself comes from the committed wrapper.
+      # Caching only.
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
-        timeout-minutes: 10
 
-      - name: Check Gradle wrapper files
+      - name: Generate Gradle wrapper (only if not committed)
+        timeout-minutes: 10
         run: |
-          for f in gradlew gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties; do
-            [ -f "$f" ] || { echo "Missing $f: commit the files from the gradle-wrapper-files artifact"; exit 1; }
-          done
+          if [ ! -f gradlew ] || [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle --version
+            gradle wrapper --gradle-version 8.9 --distribution-type bin
+          fi
           chmod +x gradlew
 
       - name: Build debug APK
@@ -66,3 +67,14 @@ jobs:
           name: asl-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Upload generated Gradle wrapper
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-wrapper-files
+          path: |
+            gradlew
+            gradlew.bat
+            gradle/wrapper/gradle-wrapper.jar
+            gradle/wrapper/gradle-wrapper.properties
+          if-no-files-found: warn
