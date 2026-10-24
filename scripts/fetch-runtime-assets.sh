@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Fetches the PRoot runtime and a tiny test rootfs, verifies them, and lays them out for the APK build.
 #
-#   PRoot + libtalloc  <- Termux package repository (prebuilt Android binaries, SHA-256 from the repo index)
-#   Alpine minirootfs  <- dl-cdn.alpinelinux.org (SHA-256 from Alpine's release metadata)
+#   PRoot + its shared libraries <- Termux package repository (prebuilt Android binaries, SHA-256 from the repo index)
+#   Alpine minirootfs            <- dl-cdn.alpinelinux.org (SHA-256 from Alpine's release metadata)
 #
 # Output (all git-ignored, regenerated every build):
-#   app/src/main/jniLibs/<abi>/libproot.so, libproot-loader.so, [libproot-loader32.so], libtalloc.so
+#   app/src/main/jniLibs/<abi>/libproot.so, libproot-loader.so, [libproot-loader32.so], lib<dep>.so ...
 #   app/src/main/assets/rootfs/<abi>/alpine-minirootfs.tar.gz, rootfs.info, runtime.info
 #
-# Requires: bash curl dpkg-deb patchelf readelf python3 sha256sum xz gzip  (Linux/macOS/WSL; CI installs them)
+# Requires: bash curl dpkg-deb patchelf readelf python3 sha256sum xz gzip  (Linux/macOS/WSL; CI has them)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,6 +17,7 @@ JNI_DIR="$ROOT/app/src/main/jniLibs"
 ASSET_DIR="$ROOT/app/src/main/assets/rootfs"
 TERMUX_REPO="${TERMUX_REPO:-https://packages.termux.dev/apt/termux-main}"
 ALPINE_BASE="${ALPINE_BASE:-https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases}"
+TERMUX_LIB_DIR="data/data/com.termux/files/usr/lib"
 
 for tool in curl dpkg-deb patchelf readelf python3 sha256sum xz gzip; do
   command -v "$tool" >/dev/null 2>&1 || { echo "ERROR: required tool '$tool' not found in PATH" >&2; exit 1; }
@@ -28,6 +29,12 @@ mkdir -p "$WORK"
 # "<android abi> <termux arch> <alpine arch>"
 TARGETS=("arm64-v8a aarch64 aarch64" "armeabi-v7a arm armv7")
 
+# Libraries provided by Android itself; everything else must be bundled.
+SYSTEM_LIBS=" libc.so libdl.so libm.so liblog.so "
+is_system_lib() { case "$SYSTEM_LIBS" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+needed_of() { readelf -d "$1" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'; }
+
 fetch_index() { # $1 termux arch, $2 output file
   local base="$TERMUX_REPO/dists/stable/main/binary-$1"
   if curl -fsSL "$base/Packages" -o "$2" 2>/dev/null; then return 0; fi
@@ -37,15 +44,42 @@ fetch_index() { # $1 termux arch, $2 output file
   return 1
 }
 
-check_needed() { # $1 elf file, $2 label : fail on unexpected shared-library dependencies
-  local needed n
-  needed="$(readelf -d "$1" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p')"
-  echo "  $2 NEEDED: $(echo "$needed" | tr '\n' ' ')"
-  for n in $needed; do
-    case "$n" in
-      libc.so|libdl.so|libm.so|liblog.so|libtalloc.so|libtalloc.so.2) ;;
-      *) echo "ERROR: $2 depends on '$n', which is not an Android system library. It must be bundled too (see docs/ADR-0001)." >&2; exit 1 ;;
-    esac
+# Downloads + verifies + extracts one Termux package into $W/<pkg> (once). Uses globals W and A.
+fetch_termux_pkg() { # $1 package name
+  local pkg="$1" entry FILENAME SHA VERSION
+  if [ -d "$W/$pkg" ]; then return 0; fi
+  if ! entry="$(python3 "$ROOT/scripts/termux_index.py" "$W/Packages" "$pkg")"; then
+    echo "ERROR: Termux package '$pkg' not found. A dependency name may not map to a package name 1:1; add a mapping." >&2
+    return 1
+  fi
+  IFS='|' read -r FILENAME SHA VERSION <<<"$entry"
+  echo "  $pkg $VERSION ($FILENAME)"
+  curl -fsSL "$TERMUX_REPO/$FILENAME" -o "$W/$pkg.deb"
+  echo "$SHA  $W/$pkg.deb" | sha256sum -c -
+  dpkg-deb -x "$W/$pkg.deb" "$W/$pkg"
+  {
+    echo "$pkg.version=$VERSION"
+    echo "$pkg.deb=$TERMUX_REPO/$FILENAME"
+    echo "$pkg.deb.sha256=$SHA"
+  } >> "$A/runtime.info"
+}
+
+# Bundles the library named by a NEEDED entry (e.g. libtalloc.so.2 -> $J/libtalloc.so), then its own deps.
+bundle_lib() { # $1 soname; uses globals W J
+  local soname="$1" base out real n
+  base="${soname%%.so*}"        # libtalloc.so.2 -> libtalloc
+  out="$J/$base.so"
+  if [ -f "$out" ]; then return 0; fi
+  fetch_termux_pkg "$base"
+  real="$(readlink -f "$W/$base/$TERMUX_LIB_DIR/$soname")"
+  if [ ! -f "$real" ]; then
+    echo "ERROR: $soname not found inside Termux package '$base'" >&2
+    return 1
+  fi
+  cp "$real" "$out"
+  chmod 755 "$out"
+  for n in $(needed_of "$out"); do
+    if ! is_system_lib "$n"; then bundle_lib "$n"; fi
   done
 }
 
@@ -63,43 +97,47 @@ for target in "${TARGETS[@]}"; do
   mkdir -p "$W" "$J" "$A"
   case "$ABI" in arm64-v8a) WANT_MACHINE="AArch64" ;; *) WANT_MACHINE="ARM" ;; esac
 
-  # --- PRoot + libtalloc from the Termux repository ---------------------------------------------
+  # --- PRoot and everything it needs, from the Termux repository ---------------------------------
   fetch_index "$TARCH" "$W/Packages"
   : > "$A/runtime.info"
-  for pkg in proot libtalloc; do
-    entry="$(python3 "$ROOT/scripts/termux_index.py" "$W/Packages" "$pkg")"
-    IFS='|' read -r FILENAME SHA VERSION <<<"$entry"
-    echo "  $pkg $VERSION ($FILENAME)"
-    curl -fsSL "$TERMUX_REPO/$FILENAME" -o "$W/$pkg.deb"
-    echo "$SHA  $W/$pkg.deb" | sha256sum -c -
-    dpkg-deb -x "$W/$pkg.deb" "$W/$pkg"
-    {
-      echo "$pkg.version=$VERSION"
-      echo "$pkg.deb=$TERMUX_REPO/$FILENAME"
-      echo "$pkg.deb.sha256=$SHA"
-    } >> "$A/runtime.info"
-  done
-  echo "source=Termux package repository (https://github.com/termux/termux-packages); binaries are GPL-2.0 (proot) / LGPL-3.0 (talloc), see THIRD_PARTY_NOTICES.md" >> "$A/runtime.info"
+  fetch_termux_pkg proot
+  echo "source=Termux package repository (https://github.com/termux/termux-packages); proot is GPL-2.0, libtalloc LGPL-3.0, other bundled libraries see THIRD_PARTY_NOTICES.md" >> "$A/runtime.info"
 
   PFX="$W/proot/data/data/com.termux/files/usr"
-  TPFX="$W/libtalloc/data/data/com.termux/files/usr"
   [ -f "$PFX/bin/proot" ] || { echo "ERROR: $PFX/bin/proot not found; package layout changed" >&2; exit 1; }
   [ -f "$PFX/libexec/proot/loader" ] || { echo "ERROR: proot loader not found; package layout changed" >&2; exit 1; }
-  TALLOC_REAL="$(readlink -f "$TPFX/lib/libtalloc.so.2")"
-  [ -f "$TALLOC_REAL" ] || { echo "ERROR: libtalloc.so.2 not found; package layout changed" >&2; exit 1; }
 
   cp "$PFX/bin/proot" "$J/libproot.so"
   cp "$PFX/libexec/proot/loader" "$J/libproot-loader.so"
   if [ -f "$PFX/libexec/proot/loader32" ]; then cp "$PFX/libexec/proot/loader32" "$J/libproot-loader32.so"; fi
-  cp "$TALLOC_REAL" "$J/libtalloc.so"
   chmod 755 "$J"/*.so
 
-  check_needed "$J/libproot.so" "proot"
-  check_needed "$J/libtalloc.so" "talloc"
+  echo "  proot NEEDED: $(needed_of "$J/libproot.so" | tr '\n' ' ')"
+  for n in $(needed_of "$J/libproot.so"); do
+    if ! is_system_lib "$n"; then bundle_lib "$n"; fi
+  done
 
-  # proot links against libtalloc.so.2 and carries a Termux-specific RUNPATH. Android only extracts
-  # files named lib*.so, so point it at the sibling libtalloc.so via $ORIGIN instead.
-  patchelf --replace-needed libtalloc.so.2 libtalloc.so --set-rpath '$ORIGIN' "$J/libproot.so"
+  # Android only extracts files named lib*.so, so versioned names (libtalloc.so.2) become libtalloc.so,
+  # and the Termux-specific RUNPATH is replaced by $ORIGIN (the directory the libraries are extracted to).
+  for f in "$J"/*.so; do
+    case "$(basename "$f")" in libproot-loader*.so) continue ;; esac
+    for n in $(needed_of "$f"); do
+      if is_system_lib "$n"; then continue; fi
+      base="${n%%.so*}"
+      if [ "$n" != "$base.so" ]; then patchelf --replace-needed "$n" "$base.so" "$f"; fi
+    done
+    patchelf --set-rpath '$ORIGIN' "$f"
+  done
+
+  # Final verification: every remaining dependency must be an Android system lib or shipped next to it.
+  for f in "$J"/*.so; do
+    case "$(basename "$f")" in libproot-loader*.so) continue ;; esac
+    echo "  $(basename "$f") NEEDED (patched): $(needed_of "$f" | tr '\n' ' ')"
+    for n in $(needed_of "$f"); do
+      if is_system_lib "$n"; then continue; fi
+      [ -f "$J/$n" ] || { echo "ERROR: $(basename "$f") needs '$n' which is neither a system library nor bundled" >&2; exit 1; }
+    done
+  done
   check_machine "$J/libproot.so" "$WANT_MACHINE"
   check_machine "$J/libproot-loader.so" "$WANT_MACHINE"
 
