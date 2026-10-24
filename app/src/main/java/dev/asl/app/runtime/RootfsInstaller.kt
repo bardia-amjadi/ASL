@@ -55,7 +55,7 @@ object RootfsInstaller {
             "Asset rootfs/$abi/rootfs.info is missing. The APK was built without running scripts/fetch-runtime-assets.sh.",
         )
         val expectedSha = info["sha256"] ?: return Finding(title, Verdict.FAIL, "rootfs.info has no sha256 entry.")
-        val assetPath = "rootfs/$abi/alpine-minirootfs.tar.gz"
+        val assetPath = "rootfs/$abi/alpine-minirootfs.bin"
 
         paths.filesDir.mkdirs()
         if (paths.filesDir.usableSpace < MIN_FREE_BYTES) {
@@ -92,7 +92,8 @@ object RootfsInstaller {
             )
         } catch (e: FileNotFoundException) {
             deleteTree(paths.rootfsStaging)
-            Finding(title, Verdict.FAIL, "Bundled archive missing: ${e.message}")
+            val listing = context.assets.list("rootfs/$abi")?.joinToString() ?: "(none)"
+            Finding(title, Verdict.FAIL, "Bundled archive missing: ${e.message}\nassets in rootfs/$abi: $listing")
         } catch (e: IOException) {
             deleteTree(paths.rootfsStaging)
             Finding(title, Verdict.FAIL, "Install failed: ${e.message}")

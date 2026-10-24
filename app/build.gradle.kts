@@ -53,7 +53,7 @@ android {
 
     // Rootfs tarballs are already compressed.
     androidResources {
-        noCompress += listOf("gz")
+        noCompress += listOf("gz", "bin")
     }
 }
 

@@ -6,7 +6,7 @@
 #
 # Output (all git-ignored, regenerated every build):
 #   app/src/main/jniLibs/<abi>/libproot.so, libproot-loader.so, [libproot-loader32.so], lib<dep>.so ...
-#   app/src/main/assets/rootfs/<abi>/alpine-minirootfs.tar.gz, rootfs.info, runtime.info
+#   app/src/main/assets/rootfs/<abi>/alpine-minirootfs.bin, rootfs.info, runtime.info
 #
 # Requires: bash curl dpkg-deb patchelf readelf python3 sha256sum xz gzip  (Linux/macOS/WSL; CI has them)
 set -euo pipefail
@@ -153,7 +153,7 @@ for target in "${TARGETS[@]}"; do
   echo "  alpine $AVER ($AFILE)"
   curl -fsSL "$ALPINE_BASE/$AARCH/$AFILE" -o "$W/$AFILE"
   echo "$ASHA  $W/$AFILE" | sha256sum -c -
-  cp "$W/$AFILE" "$A/alpine-minirootfs.tar.gz"
+  cp "$W/$AFILE" "$A/alpine-minirootfs.bin"
   {
     echo "source_url=$ALPINE_BASE/$AARCH/$AFILE"
     echo "file=$AFILE"
