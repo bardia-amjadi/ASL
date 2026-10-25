@@ -29,6 +29,11 @@ object Experiments {
                 appendLine("runtime provenance (from build):")
                 appendLine(it.prependIndent("  "))
             } ?: appendLine("runtime provenance: asset missing (APK built without fetch-runtime-assets.sh?)")
+            DebianInstaller.readManifest(context, abi)?.let {
+                appendLine("debian manifest: ${it.suite}-${it.variant} ${it.version}, ${it.size / 1024 / 1024} MB ${it.format}, source commit ${it.sourceCommit.take(12)}")
+                appendLine("  url: ${it.url}")
+                appendLine("  sha256: ${it.sha256}")
+            } ?: appendLine("debian manifest: asset missing (APK built without scripts/resolve-debian.sh?)")
         }
     }.trimEnd()
 
@@ -49,7 +54,7 @@ object Experiments {
         val title = "B. control: exec a COPY from app data dir (expected: blocked)"
         if (!paths.proot.exists() || !paths.talloc.exists()) return Finding(title, Verdict.FAIL, "Runtime files missing; cannot run control.")
         return try {
-            RootfsInstaller.deleteTree(paths.execTestDir)
+            TarExtractor.deleteTree(paths.execTestDir)
             paths.execTestDir.mkdirs()
             val copy = File(paths.execTestDir, "proot-copy")
             paths.proot.copyTo(copy, overwrite = true)
@@ -67,7 +72,7 @@ object Experiments {
         } catch (e: IOException) {
             Finding(title, Verdict.INFO, "Control could not be prepared: ${e.message}")
         } finally {
-            RootfsInstaller.deleteTree(paths.execTestDir)
+            TarExtractor.deleteTree(paths.execTestDir)
         }
     }
 

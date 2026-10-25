@@ -14,8 +14,8 @@ android {
         // Deliberately >= 29: the PoC must work under the modern W^X exec restrictions,
         // NOT by targeting an old SDK to dodge them.
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-poc"
+        versionCode = 2
+        versionName = "0.2.0-poc"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -67,4 +67,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.apache.commons:commons-compress:1.26.2")
+    implementation("org.tukaani:xz:1.10")
 }

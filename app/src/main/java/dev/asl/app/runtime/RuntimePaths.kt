@@ -32,6 +32,11 @@ class RuntimePaths(context: Context) {
     val rootfsStaging = File(filesDir, "rootfs/alpine.staging")
     val installedMarker = File(filesDir, "rootfs/alpine.installed")
 
+    val downloadsDir = File(filesDir, "downloads")
+    val debianRoot = File(filesDir, "rootfs/debian")
+    val debianStaging = File(filesDir, "rootfs/debian.staging")
+    val debianMarker = File(filesDir, "rootfs/debian.installed")
+
     val tmp = File(app.cacheDir, "proot-tmp")
     val execTestDir = File(filesDir, "exec-test")
 }

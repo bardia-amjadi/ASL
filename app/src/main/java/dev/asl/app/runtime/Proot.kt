@@ -1,5 +1,7 @@
 package dev.asl.app.runtime
 
+import java.io.File
+
 /** Builds PRoot command lines and the (minimal, explicit) process environment. */
 object Proot {
     private const val GUEST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -18,13 +20,13 @@ object Proot {
         return env
     }
 
-    /** `proot ... /bin/sh -c <script>` inside the Alpine test rootfs, with a clean guest environment. */
-    fun guestShell(paths: RuntimePaths, script: String): List<String> = listOf(
+    /** `proot ... /bin/sh -c <script>` inside [rootfs] (Alpine PoC by default), with a clean guest environment. */
+    fun guestShell(paths: RuntimePaths, script: String, rootfs: File = paths.rootfs): List<String> = listOf(
         paths.proot.path,
         "--kill-on-exit",
         "--link2symlink",
         "-0",
-        "-r", paths.rootfs.path,
+        "-r", rootfs.path,
         "-b", "/dev",
         "-b", "/proc",
         "-b", "/sys",
