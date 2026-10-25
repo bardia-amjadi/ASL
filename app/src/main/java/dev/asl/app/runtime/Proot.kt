@@ -37,4 +37,30 @@ object Proot {
         "TERM=xterm-256color",
         "/bin/sh", "-c", script,
     )
+
+    /**
+     * Interactive login shell inside [rootfs] (used with a PTY). The guest gets a clean environment via
+     * `env -i`; the host-side proot process gets [env].
+     */
+    fun interactive(paths: RuntimePaths, rootfs: File, shell: String): List<String> = listOf(
+        paths.proot.path,
+        "--kill-on-exit",
+        "--link2symlink",
+        "-0",
+        "-r", rootfs.path,
+        "-b", "/dev",
+        "-b", "/proc",
+        "-b", "/sys",
+        "-w", "/root",
+        "/usr/bin/env", "-i",
+        "HOME=/root",
+        "USER=root",
+        "LOGNAME=root",
+        "SHELL=$shell",
+        "PATH=$GUEST_PATH",
+        "TERM=xterm-256color",
+        "COLORTERM=truecolor",
+        "LANG=C.UTF-8",
+        shell, "-l",
+    )
 }

@@ -24,6 +24,7 @@ data class UiState(
     val report: String = "",
     val installing: Boolean = false,
     val debianInstalled: Boolean = false,
+    val alpineInstalled: Boolean = false,
     val debianStatus: String = "Checking...",
     val debianProgress: Float? = null,
 )
@@ -141,7 +142,11 @@ class PocViewModel(application: Application) : AndroidViewModel(application) {
             DebianInstaller.hasPartialDownload(paths) -> "Not installed (partial download kept; Install resumes it)"
             else -> "Not installed"
         }
-        return copy(debianInstalled = installed, debianStatus = if (installing) debianStatus else status)
+        return copy(
+            debianInstalled = installed,
+            alpineInstalled = RootfsInstaller.isInstalled(paths),
+            debianStatus = if (installing) debianStatus else status,
+        )
     }
 
     private fun log(f: Finding) = append("[${f.verdict}] ${f.title}\n${f.detail.prependIndent("    ")}\n")

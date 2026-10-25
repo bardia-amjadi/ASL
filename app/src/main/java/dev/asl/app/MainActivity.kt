@@ -1,48 +1,65 @@
 package dev.asl.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.asl.app.runtime.RuntimePaths
+import dev.asl.app.terminal.DistroInfo
+import dev.asl.app.terminal.Distros
+import dev.asl.app.terminal.SessionManager
+import dev.asl.app.ui.AppMark
+import dev.asl.app.ui.AslColors
+import dev.asl.app.ui.AslTheme
+import dev.asl.app.ui.CubeIcon
+import dev.asl.app.ui.DiagnosticsScreen
+import dev.asl.app.ui.DistrosScreen
+import dev.asl.app.ui.TerminalIcon
+import dev.asl.app.ui.TerminalScreen
 
 class MainActivity : ComponentActivity() {
     private val viewModel: PocViewModel by viewModels()
@@ -51,117 +68,98 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                PocScreen(viewModel)
+            AslTheme { AslApp(viewModel) }
+        }
+    }
+}
+
+private const val TAB_TERMINAL = 0
+private const val TAB_DISTROS = 1
+private const val TAB_LOG = 2
+
+@Composable
+private fun AslApp(vm: PocViewModel) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val paths = remember { RuntimePaths(context) }
+    val distros = remember(state.debianInstalled, state.alpineInstalled) { Distros.all(paths) }
+    val installed = distros.filter { it.installed }
+    var tab by rememberSaveable { mutableIntStateOf(TAB_TERMINAL) }
+    var askedNotifications by rememberSaveable { mutableStateOf(false) }
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    fun open(distro: DistroInfo) {
+        if (Build.VERSION.SDK_INT >= 33 && !askedNotifications &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askedNotifications = true
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (SessionManager.sessions.value.size >= SessionManager.MAX_SESSIONS) {
+            Toast.makeText(context, "Limit reached: ${SessionManager.MAX_SESSIONS} sessions", Toast.LENGTH_SHORT).show()
+        } else {
+            SessionManager.open(context, distro, state.disableSeccomp)
+        }
+        tab = TAB_TERMINAL
+    }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = AslColors.Bg) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            TitleBar()
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when (tab) {
+                    TAB_TERMINAL -> TerminalScreen(
+                        installed = installed,
+                        onOpen = ::open,
+                        onGoToDistros = { tab = TAB_DISTROS },
+                    )
+                    TAB_DISTROS -> DistrosScreen(
+                        vm = vm,
+                        onOpen = { id -> distros.firstOrNull { it.id == id }?.let(::open) },
+                        onShowLog = { tab = TAB_LOG },
+                    )
+                    else -> DiagnosticsScreen(vm)
+                }
             }
+            BottomBar(tab) { tab = it }
         }
     }
 }
 
 @Composable
-private fun PocScreen(vm: PocViewModel) {
-    val state by vm.state.collectAsStateWithLifecycle()
-    val clipboard = LocalClipboardManager.current
-    val scroll = rememberScrollState()
-    var confirmRemove by remember { mutableStateOf(false) }
-
-    if (confirmRemove) {
-        AlertDialog(
-            onDismissRequest = { confirmRemove = false },
-            title = { Text("Remove Debian?") },
-            text = {
-                Text(
-                    "This permanently deletes the Debian system, everything you stored inside it " +
-                        "(including /root), and any partial download. This cannot be undone.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmRemove = false
-                    vm.removeDebian()
-                }) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Keep") } },
-        )
+private fun TitleBar() {
+    Row(
+        Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AppMark(24.dp)
+        Spacer(Modifier.width(10.dp))
+        Text("ASL", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Spacer(Modifier.width(8.dp))
+        Text("Android Subsystem for Linux", fontSize = 11.sp, color = AslColors.TextDim)
     }
+    HorizontalDivider(color = AslColors.Border)
+}
 
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier.safeDrawingPadding().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text("ASL — runtime proof of concept (Phase 2)", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Real PRoot, real rootfs, real output. Nothing is simulated; a FAIL is a genuine result.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+@Composable
+private fun BottomBar(selected: Int, onSelect: (Int) -> Unit) {
+    HorizontalDivider(color = AslColors.Border)
+    Row(Modifier.fillMaxWidth().background(AslColors.Surface).height(54.dp)) {
+        NavItem(TerminalIcon, "Terminal", selected == TAB_TERMINAL) { onSelect(TAB_TERMINAL) }
+        NavItem(CubeIcon, "Distros", selected == TAB_DISTROS) { onSelect(TAB_DISTROS) }
+        NavItem(Icons.Default.Info, "Log", selected == TAB_LOG) { onSelect(TAB_LOG) }
+    }
+}
 
-            // ---- Debian ----
-            Text("Debian: ${state.debianStatus}", style = MaterialTheme.typography.titleSmall)
-            if (state.installing) {
-                val p = state.debianProgress
-                if (p != null) LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
-                else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = vm::installDebian,
-                    enabled = !state.busy && !state.debianInstalled,
-                    modifier = Modifier.weight(1f),
-                ) { Text("Install Debian") }
-                OutlinedButton(onClick = vm::cancelDebian, enabled = state.installing, modifier = Modifier.weight(1f)) { Text("Cancel") }
-                OutlinedButton(
-                    onClick = { confirmRemove = true },
-                    enabled = !state.busy && state.debianInstalled,
-                    modifier = Modifier.weight(1f),
-                ) { Text("Remove") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = vm::runDebianProbe, enabled = !state.busy && state.debianInstalled, modifier = Modifier.weight(1f)) { Text("Debian test") }
-                OutlinedButton(onClick = vm::aptUpdate, enabled = !state.busy && state.debianInstalled, modifier = Modifier.weight(1f)) { Text("apt update") }
-            }
-
-            // ---- Phase 1 diagnostics ----
-            Text("Phase 1 diagnostics (Alpine)", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = vm::runAll, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Run all") }
-                OutlinedButton(onClick = vm::execExperiments, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Exec tests") }
-                OutlinedButton(onClick = vm::runLinuxProbe, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("uname -m") }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Switch(checked = state.disableSeccomp, onCheckedChange = vm::setDisableSeccomp, enabled = !state.busy)
-                Text(
-                    "  Disable PRoot seccomp acceleration (PROOT_NO_SECCOMP=1)",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { clipboard.setText(AnnotatedString(state.report)) }) { Text("Copy report") }
-                TextButton(onClick = vm::clearReport, enabled = !state.busy) { Text("Clear") }
-                TextButton(onClick = vm::installRootfs, enabled = !state.busy) { Text("Install Alpine") }
-                TextButton(onClick = vm::removeRootfs, enabled = !state.busy) { Text("Remove Alpine") }
-            }
-            if (state.busy && !state.installing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 120.dp)
-                    .fillMaxWidth()
-                    .background(Color(0xFF0F1318), RoundedCornerShape(8.dp))
-                    .padding(8.dp),
-            ) {
-                SelectionContainer {
-                    Text(
-                        text = state.report,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                        modifier = Modifier.verticalScroll(scroll),
-                    )
-                }
-            }
-        }
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.NavItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+    val tint = if (selected) AslColors.Accent else AslColors.TextDim
+    Column(
+        Modifier.weight(1f).fillMaxSize().clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+        Text(label, fontSize = 10.sp, color = tint)
     }
 }
