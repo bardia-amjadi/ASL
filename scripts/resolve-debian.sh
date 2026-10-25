@@ -19,6 +19,7 @@ TAG="${DEBIAN_TAG:-trixie-slim}"
 LIB_URL="${LIB_URL:-https://raw.githubusercontent.com/docker-library/official-images/master/library/debian}"
 ART_REPO="${ART_REPO:-https://raw.githubusercontent.com/debuerreotype/docker-debian-artifacts}"
 
+EXPECT_LAYER_SHA=""
 for tool in curl python3 sha256sum tar od stat head awk; do
   command -v "$tool" >/dev/null 2>&1 || { echo "ERROR: required tool '$tool' not found in PATH" >&2; exit 1; }
 done
@@ -43,17 +44,40 @@ for target in "${TARGETS[@]}"; do
   echo "  reviewed commit: $COMMIT  directory: $DIR"
   base="$ART_REPO/$COMMIT/$DIR"
 
+  # The library file's Directory may already end in "/oci" (OCI image layout), so probe several layouts.
   found=""
-  for cand in "oci/blobs/rootfs.tar.gz" "rootfs.tar.xz"; do
+  for cand in "blobs/rootfs.tar.gz" "oci/blobs/rootfs.tar.gz" "rootfs.tar.xz" "oci/rootfs.tar.gz"; do
     if curl -fsIL "$base/$cand" -o /dev/null 2>/dev/null; then found="$cand"; break; fi
   done
-  [ -n "$found" ] || { echo "ERROR: no rootfs artifact found under $base (tried oci/blobs/rootfs.tar.gz, rootfs.tar.xz); the repository layout may have changed" >&2; exit 1; }
+  # Fallback: walk the OCI layout (index.json -> manifest -> first layer blob).
+  if [ -z "$found" ]; then
+    for root in "" "oci/"; do
+      if curl -fsSL "$base/${root}index.json" -o "$WORK/index.json" 2>/dev/null; then
+        MHEX="$(python3 "$ROOT/scripts/oci_layer.py" index "$WORK/index.json")"
+        curl -fsSL "$base/${root}blobs/sha256/$MHEX" -o "$WORK/manifest.json"
+        LHEX="$(python3 "$ROOT/scripts/oci_layer.py" manifest "$WORK/manifest.json")"
+        found="${root}blobs/sha256/$LHEX"
+        EXPECT_LAYER_SHA="$LHEX"
+        break
+      fi
+    done
+  fi
+  if [ -z "$found" ]; then
+    echo "ERROR: no rootfs artifact found under $base" >&2
+    echo "  tried blobs/rootfs.tar.gz, oci/blobs/rootfs.tar.gz, rootfs.tar.xz, oci/rootfs.tar.gz and an OCI index.json walk" >&2
+    echo "  HTTP status of $base/index.json: $(curl -s -o /dev/null -w '%{http_code}' "$base/index.json" || true)" >&2
+    exit 1
+  fi
   URL="$base/$found"
   echo "  artifact: $URL"
 
   FILE="$WORK/$ABI.archive"
   curl -fsSL "$URL" -o "$FILE"
   SHA="$(sha256sum "$FILE" | awk '{print $1}')"
+  if [ -n "${EXPECT_LAYER_SHA:-}" ] && [ "$SHA" != "$EXPECT_LAYER_SHA" ]; then
+    echo "ERROR: downloaded blob SHA-256 $SHA does not match the OCI manifest digest $EXPECT_LAYER_SHA" >&2; exit 1
+  fi
+  EXPECT_LAYER_SHA=""
   SIZE="$(stat -c %s "$FILE")"
   MAGIC="$(head -c 6 "$FILE" | od -An -tx1 | tr -d ' \n')"
   case "$MAGIC" in
