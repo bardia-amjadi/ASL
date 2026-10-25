@@ -31,15 +31,20 @@ jobs:
       - name: Check tools for runtime asset preparation
         timeout-minutes: 2
         run: |
-          for t in patchelf readelf xz gzip dpkg-deb curl python3 sha256sum; do
+          for t in patchelf readelf xz gzip dpkg-deb curl python3 sha256sum tar od stat; do
             command -v "$t" >/dev/null || { echo "Missing tool: $t"; exit 1; }
           done
 
+      # PRoot + libraries (Termux repo) and the Alpine test rootfs, SHA-256 verified.
       - name: Fetch and verify runtime assets
         timeout-minutes: 10
         run: bash scripts/fetch-runtime-assets.sh
 
-      # Caching only.
+      # Pins the Debian rootfs (reviewed commit + SHA-256) that the app will download on the phone.
+      - name: Resolve Debian manifest
+        timeout-minutes: 10
+        run: bash scripts/resolve-debian.sh
+
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
@@ -59,7 +64,7 @@ jobs:
       - name: Show APK contents (native libs and assets)
         run: |
           ls -l app/build/outputs/apk/debug/
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E "lib/|assets/rootfs/" || true
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E "lib/|assets/(rootfs|distro)/" || true
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
