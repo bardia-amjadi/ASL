@@ -37,6 +37,17 @@ class RuntimePaths(context: Context) {
     val debianStaging = File(filesDir, "rootfs/debian.staging")
     val debianMarker = File(filesDir, "rootfs/debian.installed")
 
+    /** Root directory of a distro by id: "debian" (13), "debian12", "ubuntu", "alpine". */
+    fun rootOf(id: String): File = when (id) {
+        "debian" -> debianRoot
+        "alpine" -> rootfs
+        else -> File(filesDir, "rootfs/$id")
+    }
+
+    fun stagingOf(id: String): File = File(filesDir, "rootfs/$id.staging")
+
+    fun markerOf(id: String): File = File(filesDir, "rootfs/$id.installed")
+
     val tmp = File(app.cacheDir, "proot-tmp")
     val execTestDir = File(filesDir, "exec-test")
 }

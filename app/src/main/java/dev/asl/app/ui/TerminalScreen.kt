@@ -57,6 +57,8 @@ import dev.asl.app.terminal.KeyEncoder
 import dev.asl.app.terminal.SessionManager
 import dev.asl.app.terminal.TerminalPrefs
 import dev.asl.app.terminal.TerminalSession
+import dev.asl.app.terminal.TerminalTheme
+import dev.asl.app.terminal.TerminalThemes
 import dev.asl.app.terminal.TerminalView
 
 @Composable
@@ -73,6 +75,8 @@ fun TerminalScreen(
     val modifiers = remember { InputModifiers() }
     var viewRef by remember { mutableStateOf<TerminalView?>(null) }
     var fontSp by remember { mutableFloatStateOf(prefs.fontSizeSp) }
+    val theme = remember { TerminalThemes.byId(prefs.themeId) }
+    val cursorStyle = remember { prefs.cursorStyle }
 
     fun zoom(delta: Float) {
         fontSp = (fontSp + delta).coerceIn(8f, 34f)
@@ -105,7 +109,7 @@ fun TerminalScreen(
             onZoomOut = { zoom(-1f) },
             onRestart = { current?.restart() },
         )
-        Box(Modifier.weight(1f).fillMaxWidth().background(AslColors.TerminalBg)) {
+        Box(Modifier.weight(1f).fillMaxWidth().background(Color(theme.bg))) {
             if (current == null) {
                 EmptyState(installed, onOpen, onGoToDistros)
             } else {
@@ -113,6 +117,8 @@ fun TerminalScreen(
                     TerminalHost(
                         session = current,
                         modifiers = modifiers,
+                        theme = theme,
+                        cursorStyle = cursorStyle,
                         fontSp = fontSp,
                         onFontChanged = { sp ->
                             fontSp = sp
@@ -132,6 +138,8 @@ fun TerminalScreen(
 private fun TerminalHost(
     session: TerminalSession,
     modifiers: InputModifiers,
+    theme: TerminalTheme,
+    cursorStyle: Int,
     fontSp: Float,
     onFontChanged: (Float) -> Unit,
     onLongPress: () -> Unit,
@@ -143,6 +151,8 @@ private fun TerminalHost(
             val density = ctx.resources.displayMetrics.scaledDensity
             TerminalView(ctx).also { v ->
                 v.modifiers = modifiers
+                v.theme = theme
+                v.cursorStyleOverride = cursorStyle
                 v.textSizePx = fontSp * density
                 v.onTextSizeChanged = { px -> onFontChanged(px / density) }
                 v.onLongPressListener = onLongPress

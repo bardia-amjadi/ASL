@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import dev.asl.app.MainActivity
 import dev.asl.app.R
+import dev.asl.app.devserver.DevServer
 
 /**
  * Foreground service that exists only while terminal sessions exist. It keeps the process at foreground
@@ -22,6 +23,8 @@ class TerminalService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_EXIT) {
+            DevServer.stop()
+            dev.asl.app.desktop.DesktopManager.stop()
             SessionManager.closeAll(this)
             stopSelf()
             return START_NOT_STICKY
@@ -54,11 +57,20 @@ class TerminalService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_terminal)
             .setContentTitle("ASL")
-            .setContentText(if (count == 1) "1 terminal session running" else "$count terminal sessions running")
+            .setContentText(contentText(count))
             .setContentIntent(open)
             .setOngoing(true)
             .addAction(Notification.Action.Builder(null, "Close all", exit).build())
             .build()
+    }
+
+    private fun contentText(count: Int): String {
+        val parts = mutableListOf<String>()
+        if (count > 0) parts += if (count == 1) "1 terminal session" else "$count terminal sessions"
+        val bg = SessionManager.backgroundNames
+        if ("devserver" in bg) parts += "dev server on 127.0.0.1:${DevServer.PORT}"
+        if ("desktop" in bg) parts += "desktop (VNC) running"
+        return parts.joinToString(" \u00b7 ").ifEmpty { "Running" }
     }
 
     companion object {

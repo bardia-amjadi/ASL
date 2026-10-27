@@ -29,7 +29,7 @@ object Experiments {
                 appendLine("runtime provenance (from build):")
                 appendLine(it.prependIndent("  "))
             } ?: appendLine("runtime provenance: asset missing (APK built without fetch-runtime-assets.sh?)")
-            DebianInstaller.readManifest(context, abi)?.let {
+            DistroInstaller.readManifest(context, abi)?.let {
                 appendLine("debian manifest: ${it.suite}-${it.variant} ${it.version}, ${it.size / 1024 / 1024} MB ${it.format}, source commit ${it.sourceCommit.take(12)}")
                 appendLine("  url: ${it.url}")
                 appendLine("  sha256: ${it.sha256}")

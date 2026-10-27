@@ -10,7 +10,7 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.security.MessageDigest
 
-/** Installs the bundled Alpine minirootfs (the Phase 1 PoC guest). Debian is handled by [DebianInstaller]. */
+/** Installs the bundled Alpine minirootfs (the Phase 1 PoC guest). Debian is handled by [DistroInstaller]. */
 object RootfsInstaller {
     private const val MIN_FREE_BYTES = 100L * 1024 * 1024
 

@@ -31,8 +31,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.asl.app.PocViewModel
-import dev.asl.app.runtime.DebianInstaller
+import dev.asl.app.runtime.DistroInstaller
 import dev.asl.app.runtime.RuntimePaths
+import dev.asl.app.terminal.DistroInfo
 import dev.asl.app.terminal.Distros
 
 @Composable
@@ -40,26 +41,17 @@ fun DistrosScreen(vm: PocViewModel, onOpen: (String) -> Unit, onShowLog: () -> U
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val paths = remember { RuntimePaths(context) }
-    val distros = remember(state.debianInstalled, state.alpineInstalled) { Distros.all(paths) }
-    val debian = distros.first { it.id == "debian" }
-    val alpine = distros.first { it.id == "alpine" }
-    val manifest = remember { paths.abi?.let { DebianInstaller.readManifest(context, it) } }
-    var confirmRemove by remember { mutableStateOf<String?>(null) }
+    val distros = remember(state.installedIds) { Distros.all(paths) }
+    var confirmRemove by remember { mutableStateOf<DistroInfo?>(null) }
 
-    confirmRemove?.let { which ->
+    confirmRemove?.let { d ->
         AlertDialog(
             onDismissRequest = { confirmRemove = null },
-            title = { Text("Remove ${if (which == "debian") "Debian" else "Alpine"}?") },
-            text = {
-                Text(
-                    "This permanently deletes the system and everything stored inside it (including /root)" +
-                        (if (which == "debian") ", plus any partial download" else "") +
-                        ". This cannot be undone.",
-                )
-            },
+            title = { Text("Remove ${d.label}?") },
+            text = { Text("This permanently deletes ${d.label} and everything stored inside it (including /root), plus any partial download. This cannot be undone.") },
             confirmButton = {
                 TextButton(onClick = {
-                    if (which == "debian") vm.removeDebian() else vm.removeRootfs()
+                    vm.removeDistro(d.id)
                     confirmRemove = null
                 }) { Text("Delete") }
             },
@@ -67,56 +59,50 @@ fun DistrosScreen(vm: PocViewModel, onOpen: (String) -> Unit, onShowLog: () -> U
         )
     }
 
-    Column(
-        Modifier.verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Distributions", style = MaterialTheme.typography.titleMedium)
 
-        // ---- Debian ----
-        DistroCard(
-            badge = { DistroBadge(debian, 36.dp) },
-            title = "Debian",
-            subtitle = manifest?.let { "${it.version} (${it.suite}-${it.variant}) \u00b7 ${it.size / 1024 / 1024} MB download" }
-                ?: "Debian rootfs info missing from this build",
-            status = state.debianStatus,
-            progress = if (state.installing) (state.debianProgress ?: -1f) else null,
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                if (state.debianInstalled) {
-                    Button(onClick = { onOpen("debian") }, modifier = Modifier.weight(1f)) { Text("Open terminal") }
-                } else {
-                    Button(onClick = vm::installDebian, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Install") }
-                }
-                if (state.installing) OutlinedButton(onClick = vm::cancelDebian) { Text("Cancel") }
-                if (state.debianInstalled) {
-                    OutlinedButton(onClick = { confirmRemove = "debian" }, enabled = !state.busy) { Text("Remove") }
-                }
+        distros.forEach { d ->
+            val manifest = remember(d.id) { if (d.downloaded) paths.abi?.let { DistroInstaller.readManifest(context, it, d.id) } else null }
+            val subtitle = when {
+                !d.downloaded -> "Tiny test guest (about 4 MB), bundled in the app"
+                manifest != null -> "${manifest.version} \u00b7 ${manifest.size / 1024 / 1024} MB download \u00b7 signature: ${manifest.signature}"
+                else -> "Not included in this build (the matching resolve script did not run)"
             }
-            if (state.debianInstalled) {
+            val installingThis = state.installingId == d.id
+            DistroCard(
+                badge = { DistroBadge(d, 36.dp) },
+                title = d.label,
+                subtitle = subtitle,
+                status = state.statusById[d.id] ?: "",
+                progress = if (installingThis) (state.progress ?: -1f) else null,
+            ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { vm.runDebianProbe(); onShowLog() }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Self-test") }
-                    OutlinedButton(onClick = { vm.aptUpdate(); onShowLog() }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("apt update") }
+                    if (d.installed) {
+                        Button(onClick = { onOpen(d.id) }, modifier = Modifier.weight(1f)) { Text("Open terminal") }
+                        OutlinedButton(onClick = { confirmRemove = d }, enabled = !state.busy) { Text("Remove") }
+                    } else {
+                        val canInstall = !state.busy && (!d.downloaded || manifest != null)
+                        Button(
+                            onClick = { if (d.downloaded) vm.installDistro(d.id) else vm.installRootfs() },
+                            enabled = canInstall,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Install") }
+                        if (installingThis) OutlinedButton(onClick = vm::cancelInstall) { Text("Cancel") }
+                    }
+                }
+                if (d.installed && d.isApt) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { vm.runDistroProbe(d.id); onShowLog() }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Self-test") }
+                        OutlinedButton(onClick = { vm.aptUpdate(d.id); onShowLog() }, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("apt update") }
+                    }
                 }
             }
         }
 
-        // ---- Alpine ----
-        DistroCard(
-            badge = { DistroBadge(alpine, 36.dp) },
-            title = "Alpine Linux",
-            subtitle = "Tiny test guest (about 4 MB), bundled in the app",
-            status = if (state.alpineInstalled) "Installed" else "Not installed",
-            progress = null,
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                if (state.alpineInstalled) {
-                    Button(onClick = { onOpen("alpine") }, modifier = Modifier.weight(1f)) { Text("Open terminal") }
-                    OutlinedButton(onClick = { confirmRemove = "alpine" }, enabled = !state.busy) { Text("Remove") }
-                } else {
-                    Button(onClick = vm::installRootfs, enabled = !state.busy, modifier = Modifier.weight(1f)) { Text("Install") }
-                }
-            }
+        // The dev-server workflow works in any installed apt distro; use the first one.
+        distros.firstOrNull { it.installed && it.isApt }?.let { d ->
+            DevServerCard(paths = paths, root = d.root, distroLabel = d.label, disableSeccomp = state.disableSeccomp, busy = state.busy)
         }
 
         TextButton(onClick = onShowLog) { Text("Show log and diagnostics") }

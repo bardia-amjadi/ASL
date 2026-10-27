@@ -78,6 +78,76 @@ val PulseIcon: ImageVector = ImageVector.Builder("Pulse", 24.dp, 24.dp, 24f, 24f
     }
 }.build()
 
+/** Folder outline. */
+val FolderIcon: ImageVector = ImageVector.Builder("Folder", 24.dp, 24.dp, 24f, 24f).apply {
+    path(
+        stroke = SolidColor(Color.Black),
+        strokeLineWidth = 1.8f,
+        strokeLineCap = StrokeCap.Round,
+        strokeLineJoin = StrokeJoin.Round,
+    ) {
+        moveTo(3f, 7f)
+        lineTo(3f, 18f)
+        lineTo(21f, 18f)
+        lineTo(21f, 9f)
+        lineTo(12f, 9f)
+        lineTo(10f, 6f)
+        lineTo(3f, 6f)
+        close()
+    }
+}.build()
+
+/** Document outline. */
+val FileIcon: ImageVector = ImageVector.Builder("File", 24.dp, 24.dp, 24f, 24f).apply {
+    path(
+        stroke = SolidColor(Color.Black),
+        strokeLineWidth = 1.8f,
+        strokeLineCap = StrokeCap.Round,
+        strokeLineJoin = StrokeJoin.Round,
+    ) {
+        moveTo(6f, 3f)
+        lineTo(14f, 3f)
+        lineTo(19f, 8f)
+        lineTo(19f, 21f)
+        lineTo(6f, 21f)
+        close()
+        moveTo(14f, 3f)
+        lineTo(14f, 8f)
+        lineTo(19f, 8f)
+    }
+}.build()
+
+/** Gear-like slider icon for settings. */
+val SlidersIcon: ImageVector = ImageVector.Builder("Sliders", 24.dp, 24.dp, 24f, 24f).apply {
+    path(
+        stroke = SolidColor(Color.Black),
+        strokeLineWidth = 2f,
+        strokeLineCap = StrokeCap.Round,
+        strokeLineJoin = StrokeJoin.Round,
+    ) {
+        moveTo(4f, 7f); lineTo(20f, 7f)
+        moveTo(4f, 12f); lineTo(20f, 12f)
+        moveTo(4f, 17f); lineTo(20f, 17f)
+        moveTo(9f, 5f); lineTo(9f, 9f)
+        moveTo(15f, 10f); lineTo(15f, 14f)
+        moveTo(8f, 15f); lineTo(8f, 19f)
+    }
+}.build()
+
+/** Monitor outline for the desktop tab. */
+val DesktopIcon: ImageVector = ImageVector.Builder("Desktop", 24.dp, 24.dp, 24f, 24f).apply {
+    path(
+        stroke = SolidColor(Color.Black),
+        strokeLineWidth = 1.8f,
+        strokeLineCap = StrokeCap.Round,
+        strokeLineJoin = StrokeJoin.Round,
+    ) {
+        moveTo(3f, 5f); lineTo(21f, 5f); lineTo(21f, 16f); lineTo(3f, 16f); close()
+        moveTo(9f, 20f); lineTo(15f, 20f)
+        moveTo(12f, 16f); lineTo(12f, 20f)
+    }
+}.build()
+
 /** Rounded letter badge identifying a distro (D = Debian, A = Alpine). */
 @Composable
 fun DistroBadge(distro: DistroInfo, size: Dp = 22.dp) {

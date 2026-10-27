@@ -14,8 +14,8 @@ android {
         // Deliberately >= 29: the PoC must work under the modern W^X exec restrictions,
         // NOT by targeting an old SDK to dodge them.
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.0-poc"
+        versionCode = 5
+        versionName = "0.5.0-poc"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")

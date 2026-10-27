@@ -3,9 +3,10 @@ package dev.asl.app
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import dev.asl.app.runtime.DebianInstaller
+import dev.asl.app.runtime.DistroInstaller
 import dev.asl.app.runtime.Experiments
 import dev.asl.app.runtime.Finding
+import dev.asl.app.terminal.Distros
 import dev.asl.app.runtime.RootfsInstaller
 import dev.asl.app.runtime.RuntimePaths
 import kotlinx.coroutines.CancellationException
@@ -22,12 +23,15 @@ data class UiState(
     val busy: Boolean = false,
     val disableSeccomp: Boolean = false,
     val report: String = "",
-    val installing: Boolean = false,
-    val debianInstalled: Boolean = false,
-    val alpineInstalled: Boolean = false,
-    val debianStatus: String = "Checking...",
-    val debianProgress: Float? = null,
-)
+    /** Id of the distro being installed right now, if any. */
+    val installingId: String? = null,
+    val installedIds: Set<String> = emptySet(),
+    val statusById: Map<String, String> = emptyMap(),
+    val progress: Float? = null,
+) {
+    val installing: Boolean get() = installingId != null
+    fun isInstalled(id: String): Boolean = id in installedIds
+}
 
 class PocViewModel(application: Application) : AndroidViewModel(application) {
     private val paths = RuntimePaths(application)
@@ -36,7 +40,7 @@ class PocViewModel(application: Application) : AndroidViewModel(application) {
     private var installJob: Job? = null
 
     init {
-        _state.update { it.withDebianStatus() }
+        _state.update { it.withDistroStatus() }
         task { append(Experiments.describeEnvironment(getApplication<Application>(), paths) + "\n") }
     }
 
@@ -70,16 +74,19 @@ class PocViewModel(application: Application) : AndroidViewModel(application) {
         append("[INFO] Alpine test rootfs and temporary files removed.\n")
     }
 
-    // ---- Phase 2: Debian ---------------------------------------------------------------------
+    // ---- Distros (download-based: Debian 13/12, Ubuntu) ---------------------------------------
 
-    fun installDebian() {
+    private fun labelOf(id: String): String = Distros.all(paths).firstOrNull { it.id == id }?.label ?: id
+
+    fun installDistro(id: String) {
         if (_state.value.busy) return
-        _state.update { it.copy(busy = true, installing = true, debianStatus = "Starting...", debianProgress = null) }
+        val label = labelOf(id)
+        _state.update { it.copy(busy = true, installingId = id, progress = null, statusById = it.statusById + (id to "Starting...")) }
         installJob = viewModelScope.launch {
             var lastKey = ""
             try {
-                val finding = DebianInstaller.install(
-                    getApplication<Application>(), paths, _state.value.disableSeccomp,
+                val finding = DistroInstaller.install(
+                    getApplication<Application>(), paths, _state.value.disableSeccomp, id, label,
                 ) { phase, fraction ->
                     val percent = fraction?.let { (it * 100).toInt() }
                     val key = "$phase:$percent"
@@ -87,35 +94,43 @@ class PocViewModel(application: Application) : AndroidViewModel(application) {
                         lastKey = key
                         _state.update {
                             it.copy(
-                                debianStatus = if (percent != null) "$phase $percent%" else "$phase...",
-                                debianProgress = fraction,
+                                statusById = it.statusById + (id to if (percent != null) "$phase $percent%" else "$phase..."),
+                                progress = fraction,
                             )
                         }
                     }
                 }
                 log(finding)
             } catch (e: CancellationException) {
-                append("[INFO] Debian install cancelled. A partial download is kept so it can resume.\n")
+                append("[INFO] $label install cancelled. A partial download is kept so it can resume.\n")
                 throw e
             } catch (t: Throwable) {
                 append("[FAIL] Unexpected error: $t\n")
             } finally {
-                _state.update { it.copy(busy = false, installing = false, debianProgress = null).withDebianStatus() }
+                _state.update { it.copy(busy = false, installingId = null, progress = null).withDistroStatus() }
             }
         }
     }
 
-    fun cancelDebian() {
+    fun cancelInstall() {
         installJob?.cancel()
     }
 
-    fun runDebianProbe() = task { log(DebianInstaller.probe(paths, _state.value.disableSeccomp)) }
+    fun runDistroProbe(id: String) = task { log(DistroInstaller.probe(paths, _state.value.disableSeccomp, id, labelOf(id))) }
 
-    fun aptUpdate() = task { log(DebianInstaller.aptUpdate(paths, _state.value.disableSeccomp)) }
+    fun aptUpdate(id: String) = task { log(DistroInstaller.aptUpdate(paths, _state.value.disableSeccomp, id, labelOf(id))) }
 
-    fun removeDebian() = task {
-        DebianInstaller.remove(paths)
-        append("[INFO] Debian and its downloads were removed.\n")
+    fun removeDistro(id: String) = task {
+        if (id == "alpine") RootfsInstaller.remove(paths) else DistroInstaller.remove(paths, id)
+        append("[INFO] ${labelOf(id)} and its downloads were removed.\n")
+    }
+
+    fun removeAll() = task {
+        dev.asl.app.devserver.DevServer.stop()
+        dev.asl.app.desktop.DesktopManager.stop()
+        RootfsInstaller.remove(paths)
+        Distros.all(paths).filter { it.downloaded }.forEach { DistroInstaller.remove(paths, it.id) }
+        append("[INFO] All Linux data (distros, downloads) was removed.\n")
     }
 
     // ---- plumbing ------------------------------------------------------------------------------
@@ -130,23 +145,23 @@ class PocViewModel(application: Application) : AndroidViewModel(application) {
             } catch (t: Throwable) {
                 append("[FAIL] Unexpected error: $t\n")
             } finally {
-                _state.update { it.copy(busy = false).withDebianStatus() }
+                _state.update { it.copy(busy = false).withDistroStatus() }
             }
         }
     }
 
-    private fun UiState.withDebianStatus(): UiState {
-        val installed = DebianInstaller.isInstalled(paths)
-        val status = when {
-            installed -> "Installed"
-            DebianInstaller.hasPartialDownload(paths) -> "Not installed (partial download kept; Install resumes it)"
-            else -> "Not installed"
+    private fun UiState.withDistroStatus(): UiState {
+        val all = Distros.all(paths)
+        val installed = all.filter { it.installed }.map { it.id }.toSet()
+        val partial = DistroInstaller.hasPartialDownload(paths)
+        val status = all.associate { d ->
+            d.id to when {
+                d.installed -> "Installed"
+                partial && d.downloaded -> "Not installed (a partial download may be kept; Install resumes it)"
+                else -> "Not installed"
+            }
         }
-        return copy(
-            debianInstalled = installed,
-            alpineInstalled = RootfsInstaller.isInstalled(paths),
-            debianStatus = if (installing) debianStatus else status,
-        )
+        return copy(installedIds = installed, statusById = if (installing) statusById else status)
     }
 
     private fun log(f: Finding) = append("[${f.verdict}] ${f.title}\n${f.detail.prependIndent("    ")}\n")

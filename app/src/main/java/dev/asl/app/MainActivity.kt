@@ -25,8 +25,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,7 +55,13 @@ import dev.asl.app.ui.AslColors
 import dev.asl.app.ui.AslTheme
 import dev.asl.app.ui.CubeIcon
 import dev.asl.app.ui.DiagnosticsScreen
+import dev.asl.app.ui.DesktopIcon
+import dev.asl.app.ui.DesktopScreen
 import dev.asl.app.ui.DistrosScreen
+import dev.asl.app.ui.FilesScreen
+import dev.asl.app.ui.FolderIcon
+import dev.asl.app.ui.SettingsScreen
+import dev.asl.app.ui.SlidersIcon
 import dev.asl.app.ui.TerminalIcon
 import dev.asl.app.ui.TerminalScreen
 
@@ -74,18 +78,21 @@ class MainActivity : ComponentActivity() {
 }
 
 private const val TAB_TERMINAL = 0
-private const val TAB_DISTROS = 1
-private const val TAB_LOG = 2
+private const val TAB_DESKTOP = 1
+private const val TAB_FILES = 2
+private const val TAB_DISTROS = 3
+private const val TAB_SETTINGS = 4
 
 @Composable
 private fun AslApp(vm: PocViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val paths = remember { RuntimePaths(context) }
-    val distros = remember(state.debianInstalled, state.alpineInstalled) { Distros.all(paths) }
+    val distros = remember(state.installedIds) { Distros.all(paths) }
     val installed = distros.filter { it.installed }
     var tab by rememberSaveable { mutableIntStateOf(TAB_TERMINAL) }
     var askedNotifications by rememberSaveable { mutableStateOf(false) }
+    var logOpen by rememberSaveable { mutableStateOf(false) }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun open(distro: DistroInfo) {
@@ -113,15 +120,32 @@ private fun AslApp(vm: PocViewModel) {
                         onOpen = ::open,
                         onGoToDistros = { tab = TAB_DISTROS },
                     )
+                    TAB_DESKTOP -> DesktopScreen(vm = vm, onGoToDistros = { tab = TAB_DISTROS })
+                    TAB_FILES -> FilesScreen(installed = installed, onGoToDistros = { tab = TAB_DISTROS })
                     TAB_DISTROS -> DistrosScreen(
                         vm = vm,
                         onOpen = { id -> distros.firstOrNull { it.id == id }?.let(::open) },
-                        onShowLog = { tab = TAB_LOG },
+                        onShowLog = {
+                            logOpen = true
+                            tab = TAB_SETTINGS
+                        },
                     )
-                    else -> DiagnosticsScreen(vm)
+                    else -> if (logOpen) {
+                        Column(Modifier.fillMaxSize()) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                                androidx.compose.material3.TextButton(onClick = { logOpen = false }) { Text("\u2190 Settings") }
+                            }
+                            Box(Modifier.weight(1f)) { DiagnosticsScreen(vm) }
+                        }
+                    } else {
+                        SettingsScreen(vm = vm, onOpenLog = { logOpen = true })
+                    }
                 }
             }
-            BottomBar(tab) { tab = it }
+            BottomBar(tab) {
+                if (it == TAB_SETTINGS && tab == TAB_SETTINGS) logOpen = false
+                tab = it
+            }
         }
     }
 }
@@ -146,8 +170,10 @@ private fun BottomBar(selected: Int, onSelect: (Int) -> Unit) {
     HorizontalDivider(color = AslColors.Border)
     Row(Modifier.fillMaxWidth().background(AslColors.Surface).height(54.dp)) {
         NavItem(TerminalIcon, "Terminal", selected == TAB_TERMINAL) { onSelect(TAB_TERMINAL) }
+        NavItem(DesktopIcon, "Desktop", selected == TAB_DESKTOP) { onSelect(TAB_DESKTOP) }
+        NavItem(FolderIcon, "Files", selected == TAB_FILES) { onSelect(TAB_FILES) }
         NavItem(CubeIcon, "Distros", selected == TAB_DISTROS) { onSelect(TAB_DISTROS) }
-        NavItem(Icons.Default.Info, "Log", selected == TAB_LOG) { onSelect(TAB_LOG) }
+        NavItem(SlidersIcon, "Settings", selected == TAB_SETTINGS) { onSelect(TAB_SETTINGS) }
     }
 }
 

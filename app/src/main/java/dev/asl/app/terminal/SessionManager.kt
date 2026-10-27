@@ -18,6 +18,11 @@ object SessionManager {
     private val _selectedId = MutableStateFlow<Int?>(null)
     val selectedId: StateFlow<Int?> = _selectedId.asStateFlow()
 
+    private val background = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Names of non-terminal background work that keeps the foreground service alive ("devserver", "desktop"). */
+    val backgroundNames: Set<String> get() = background.toSet()
+
     private var nextId = 1
     private var lastOpenAt = 0L
     private val lock = Any()
@@ -31,7 +36,7 @@ object SessionManager {
             if (now - lastOpenAt < 600) return null
             if (_sessions.value.size >= MAX_SESSIONS) return null
             lastOpenAt = now
-            session = TerminalSession(nextId++, distro, RuntimePaths(app), disableSeccomp)
+            session = TerminalSession(nextId++, distro, RuntimePaths(app), disableSeccomp, TerminalPrefs(app).scrollbackLines)
             _sessions.update { it + session }
             _selectedId.value = session.id
         }
@@ -65,11 +70,16 @@ object SessionManager {
         syncService(context.applicationContext)
     }
 
-    /** Foreground service runs exactly while at least one session exists. */
+    fun backgroundWork(context: Context, name: String, running: Boolean) {
+        if (running) background.add(name) else background.remove(name)
+        syncService(context.applicationContext)
+    }
+
+    /** Foreground service runs exactly while a session or the dev server exists. */
     private fun syncService(app: Context) {
         val intent = Intent(app, TerminalService::class.java)
         try {
-            if (_sessions.value.isEmpty()) app.stopService(intent) else app.startForegroundService(intent)
+            if (_sessions.value.isEmpty() && background.isEmpty()) app.stopService(intent) else app.startForegroundService(intent)
         } catch (_: RuntimeException) {
             // Starting a foreground service from the background can be refused by Android; sessions still work.
         }

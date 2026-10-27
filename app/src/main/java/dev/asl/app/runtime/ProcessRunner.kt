@@ -101,4 +101,44 @@ object ProcessRunner {
             // stream closed because the process was killed
         }
     }
+
+    /**
+     * Runs a long process, delivering merged stdout/stderr line by line, and blocks until it exits.
+     * Returns the exit code, or -1 if it could not be started (the reason is delivered through [onLine]).
+     * Call from a background thread.
+     */
+    fun runStreaming(
+        command: List<String>,
+        env: Map<String, String>,
+        workDir: File?,
+        stdin: String? = null,
+        onProcess: (Process) -> Unit = {},
+        onLine: (String) -> Unit,
+    ): Int {
+        val builder = ProcessBuilder(command)
+        builder.environment().apply {
+            clear()
+            putAll(env)
+        }
+        if (workDir != null) builder.directory(workDir)
+        builder.redirectErrorStream(true)
+        val process = try {
+            builder.start()
+        } catch (e: IOException) {
+            onLine("could not start process: ${e.message}")
+            return -1
+        }
+        onProcess(process)
+        try {
+            if (stdin != null) process.outputStream.use { it.write(stdin.toByteArray(Charsets.UTF_8)) } else process.outputStream.close()
+        } catch (_: IOException) {
+            // process already ended
+        }
+        try {
+            process.inputStream.bufferedReader().forEachLine(onLine)
+        } catch (_: IOException) {
+            // stream closed because the process was killed
+        }
+        return process.waitFor()
+    }
 }
