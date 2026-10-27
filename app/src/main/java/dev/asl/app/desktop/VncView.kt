@@ -33,7 +33,7 @@ class VncView(context: Context) : View(context), RfbClient.Listener {
     private var fbW = 0
     private var fbH = 0
     private val dest = RectF()
-    private val handler = Handler(Looper.getMainLooper())
+    private val uiHandler = Handler(Looper.getMainLooper())
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private var lastClient: RfbClient? = null
 
@@ -63,7 +63,7 @@ class VncView(context: Context) : View(context), RfbClient.Listener {
 
     override fun onDetachedFromWindow() {
         if (DesktopManager.viewerListener === this) DesktopManager.viewerListener = null
-        handler.removeCallbacks(longPress)
+        uiHandler.removeCallbacks(longPress)
         super.onDetachedFromWindow()
     }
 
@@ -127,11 +127,11 @@ class VncView(context: Context) : View(context), RfbClient.Listener {
                 downY = event.y
                 dragging = false
                 longPressed = false
-                handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                uiHandler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
                 requestFocus()
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                handler.removeCallbacks(longPress)
+                uiHandler.removeCallbacks(longPress)
                 lastScrollY = averageY(event)
                 scrollAcc = 0f
                 dragging = false
@@ -152,7 +152,7 @@ class VncView(context: Context) : View(context), RfbClient.Listener {
                     }
                 } else if (!longPressed) {
                     if (!dragging && (abs(event.x - downX) > slop || abs(event.y - downY) > slop)) {
-                        handler.removeCallbacks(longPress)
+                        uiHandler.removeCallbacks(longPress)
                         dragging = true
                         toFb(downX, downY)?.let { c.pointer(it.first, it.second, 1) }
                     }
@@ -160,7 +160,7 @@ class VncView(context: Context) : View(context), RfbClient.Listener {
                 }
             }
             MotionEvent.ACTION_UP -> {
-                handler.removeCallbacks(longPress)
+                uiHandler.removeCallbacks(longPress)
                 if (dragging) {
                     toFb(event.x, event.y)?.let { c.pointer(it.first, it.second, 0) }
                 } else if (!longPressed && event.pointerCount == 1) {
@@ -170,7 +170,7 @@ class VncView(context: Context) : View(context), RfbClient.Listener {
                 dragging = false
             }
             MotionEvent.ACTION_CANCEL -> {
-                handler.removeCallbacks(longPress)
+                uiHandler.removeCallbacks(longPress)
                 if (dragging) toFb(event.x, event.y)?.let { c.pointer(it.first, it.second, 0) }
                 dragging = false
             }

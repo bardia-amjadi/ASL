@@ -290,7 +290,7 @@ class TerminalView(context: Context) : View(context) {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                showContextMenu()
+                showTerminalMenu()
             }
 
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
@@ -527,7 +527,7 @@ class TerminalView(context: Context) : View(context) {
         if (!text.isNullOrEmpty()) session?.paste(text)
     }
 
-    private fun showContextMenu() {
+    private fun showTerminalMenu() {
         val menu = PopupMenu(context, this)
         menu.menu.add(0, 1, 0, "Select text")
         menu.menu.add(0, 2, 1, "Paste")
