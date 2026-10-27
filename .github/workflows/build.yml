@@ -41,9 +41,14 @@ jobs:
         run: bash scripts/fetch-runtime-assets.sh
 
       # Pins the Debian rootfs (reviewed commit + SHA-256) that the app will download on the phone.
-      - name: Resolve Debian manifest
-        timeout-minutes: 10
+      - name: Resolve Debian manifests (Debian 13 and 12)
+        timeout-minutes: 15
         run: bash scripts/resolve-debian.sh
+
+      # Ubuntu Base 24.04 from the official Ubuntu image server; GPG verification is best effort and reported.
+      - name: Resolve Ubuntu manifest
+        timeout-minutes: 10
+        run: bash scripts/resolve-ubuntu.sh
 
       # The native PTY helper needs an NDK and CMake. Use the ones already installed on the runner so Gradle
       # does not download a large NDK.
