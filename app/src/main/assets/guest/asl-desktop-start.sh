@@ -41,6 +41,20 @@ if [ ! -S /tmp/.X11-unix/X1 ]; then
 fi
 echo "ASL-X-READY"
 
+# dbus needs a machine id; create one if the image has none.
+[ -s /etc/machine-id ] || dbus-uuidgen --ensure=/etc/machine-id 2>/dev/null
+mkdir -p /var/run/dbus 2>/dev/null
+
+echo "ASL: starting session: $*"
 dbus-launch --exit-with-session "$@" &
+SPID=$!
+
+# Report loudly if the desktop session dies (otherwise you only see a black screen with a cursor).
+(
+  sleep 3
+  while kill -0 "$SPID" 2>/dev/null; do sleep 2; done
+  echo "ASL-SESSION-ENDED: the desktop session process exited. The screen will stay black. Read the lines above for the reason."
+) &
+
 wait "$XPID"
 echo "ASL-X-EXITED"

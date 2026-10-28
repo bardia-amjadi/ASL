@@ -44,6 +44,12 @@ public final class RfbClient implements Closeable {
     private final DataInputStream in;
     private final DataOutputStream out;
     private final Object outLock = new Object();
+    /** Input is sent from this thread: Android forbids network writes on the UI thread. */
+    private final java.util.concurrent.ExecutorService sender = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "rfb-sender");
+        t.setDaemon(true);
+        return t;
+    });
     private volatile boolean closed;
     private int width;
     private int height;
@@ -86,31 +92,43 @@ public final class RfbClient implements Closeable {
     /** ARGB framebuffer, row-major. Hold {@link #lock} while reading. */
     public int[] pixels() { return pixels; }
 
-    public void pointer(int x, int y, int buttonMask) {
-        synchronized (outLock) {
-            try {
-                out.writeByte(5);
-                out.writeByte(buttonMask);
-                out.writeShort(clamp(x, 0, 65535));
-                out.writeShort(clamp(y, 0, 65535));
-                out.flush();
-            } catch (IOException e) {
-                fail(e);
+    public void pointer(final int x, final int y, final int buttonMask) {
+        submit(() -> {
+            synchronized (outLock) {
+                try {
+                    out.writeByte(5);
+                    out.writeByte(buttonMask);
+                    out.writeShort(clamp(x, 0, 65535));
+                    out.writeShort(clamp(y, 0, 65535));
+                    out.flush();
+                } catch (IOException e) {
+                    fail(e);
+                }
             }
-        }
+        });
     }
 
-    public void key(int keysym, boolean down) {
-        synchronized (outLock) {
-            try {
-                out.writeByte(4);
-                out.writeByte(down ? 1 : 0);
-                out.writeShort(0);
-                out.writeInt(keysym);
-                out.flush();
-            } catch (IOException e) {
-                fail(e);
+    public void key(final int keysym, final boolean down) {
+        submit(() -> {
+            synchronized (outLock) {
+                try {
+                    out.writeByte(4);
+                    out.writeByte(down ? 1 : 0);
+                    out.writeShort(0);
+                    out.writeInt(keysym);
+                    out.flush();
+                } catch (IOException e) {
+                    fail(e);
+                }
             }
+        });
+    }
+
+    private void submit(Runnable r) {
+        try {
+            sender.execute(r);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // connection already closed
         }
     }
 
@@ -372,6 +390,7 @@ public final class RfbClient implements Closeable {
 
     private void closeQuietly() {
         closed = true;
+        sender.shutdownNow();
         try {
             socket.close();
         } catch (IOException ignored) {
