@@ -179,9 +179,9 @@ fun SettingsScreen(vm: PocViewModel, onOpenLog: () -> Unit) {
         }
 
         Section("Desktop") {
-            Text("Resolution of the VNC desktop (applies the next time it starts)", style = MaterialTheme.typography.bodySmall, color = AslColors.TextDim)
+            Text("Desktop resolution. Lower = bigger buttons and text on a phone screen (applies the next time the desktop starts)", style = MaterialTheme.typography.bodySmall, color = AslColors.TextDim)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("1024x600", "1280x720", "1600x900").forEach { g ->
+                listOf("800x450", "960x540", "1280x720", "1600x900").forEach { g ->
                     FilterChip(selected = geometry == g, onClick = { geometry = g; DesktopManager.setGeometry(context, g) }, label = { Text(g) })
                 }
             }

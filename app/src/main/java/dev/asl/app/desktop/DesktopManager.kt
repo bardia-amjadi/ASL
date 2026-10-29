@@ -37,6 +37,9 @@ object DesktopManager {
     val log = MutableStateFlow<List<String>>(emptyList())
     val viewerStatus = MutableStateFlow("Not connected")
 
+    /** True while the full-screen desktop viewer is on screen (the app hides its own bars then). */
+    val viewerOpen = MutableStateFlow(false)
+
     private val lock = Any()
     @Volatile private var process: Process? = null
     @Volatile private var installProcess: Process? = null
@@ -72,7 +75,7 @@ object DesktopManager {
         return pw
     }
 
-    fun geometry(context: Context): String = prefs(context).getString("geometry", "1280x720") ?: "1280x720"
+    fun geometry(context: Context): String = prefs(context).getString("geometry", "960x540") ?: "960x540"
 
     fun setGeometry(context: Context, value: String) {
         prefs(context).edit().putString("geometry", value).apply()
